@@ -29,6 +29,13 @@ Both CD workflows deploy to the same EC2 Auto Scaling group provisioned in Task 
 
 Authentication to AWS uses GitHub's OIDC provider (no long-lived AWS keys in GitHub secrets) — see the `ci_deploy` IAM role in [terraform/iam.tf](terraform/iam.tf).
 
+Repeated multi-step logic (running tests, build/scan/push, deploy, Slack notification) is factored into local composite actions under [.github/actions](.github/actions), so each shows as a single named step in the workflow run instead of a wall of raw shell steps:
+
+- `test-python-app` — setup Python, install deps, run unit + integration tests
+- `docker-build-push` — build image, Trivy scan, push to ECR
+- `deploy-ec2` — update the SSM image-tag parameter, trigger ASG instance refresh
+- `notify-slack-failure` — post a failure message to Slack
+
 ### One-time manual setup required
 
 1. **Production approval gate**: GitHub → repo Settings → Environments → New environment → name it `main` → add yourself (or others) as required reviewers. Without this, `cd-main.yml`'s deploy job runs immediately with no approval step.

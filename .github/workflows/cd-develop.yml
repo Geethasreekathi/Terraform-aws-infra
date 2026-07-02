@@ -34,67 +34,46 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Set image URI
-        id: image
-        run: echo "uri=${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO_NAME }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
-
-      - name: Build Docker image
-        run: docker build -t ${{ steps.image.outputs.uri }} app
-
-      - name: Scan image for vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
+      - name: Build, scan, and push Docker image
+        uses: ./.github/actions/docker-build-push
         with:
-          scan-type: image
-          image-ref: ${{ steps.image.outputs.uri }}
-          severity: CRITICAL,HIGH
-          exit-code: 1
-
-      - name: Push image to ECR
-        run: docker push ${{ steps.image.outputs.uri }}
+          ecr-registry: ${{ steps.ecr-login.outputs.registry }}
+          ecr-repo-name: ${{ env.ECR_REPO_NAME }}
+          image-tag: ${{ github.sha }}
 
       - name: Notify Slack on failure
         if: failure()
         continue-on-error: true
-        uses: slackapi/slack-github-action@v1.27.0
+        uses: ./.github/actions/notify-slack-failure
         with:
-          payload: |
-            {"text": "Build/push failed on develop — commit ${{ github.sha }} (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"}
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+          message: "Build/push failed on develop — commit ${{ github.sha }} (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
 
   deploy-develop:
     needs: build-and-push
     runs-on: ubuntu-latest
     environment: develop
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.CI_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Update image tag in SSM
-        run: |
-          aws ssm put-parameter \
-            --name "${{ env.IMAGE_TAG_PARAM }}" \
-            --value "${{ github.sha }}" \
-            --type String \
-            --overwrite
-
-      - name: Trigger EC2 instance refresh
-        run: |
-          aws autoscaling start-instance-refresh \
-            --auto-scaling-group-name "${{ env.ASG_NAME }}" \
-            --preferences '{"MinHealthyPercentage":50,"InstanceWarmup":90}'
+      - name: Deploy to EC2
+        uses: ./.github/actions/deploy-ec2
+        with:
+          image-tag-param: ${{ env.IMAGE_TAG_PARAM }}
+          image-tag: ${{ github.sha }}
+          asg-name: ${{ env.ASG_NAME }}
 
       - name: Notify Slack on failure
         if: failure()
         continue-on-error: true
-        uses: slackapi/slack-github-action@v1.27.0
+        uses: ./.github/actions/notify-slack-failure
         with:
-          payload: |
-            {"text": "Develop deploy failed — commit ${{ github.sha }} (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"}
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+          message: "Develop deploy failed — commit ${{ github.sha }} (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
