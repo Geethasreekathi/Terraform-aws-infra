@@ -1,0 +1,57 @@
+name: CI Checks - Develop
+
+on:
+  pull_request:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: app
+        run: pip install -r development.txt
+
+      - name: Run unit tests
+        working-directory: app
+        run: pytest tests/test_unit.py -v
+
+      - name: Run integration tests
+        working-directory: app
+        run: pytest tests/test_integration.py -v --cov=. --cov-report=term-missing --cov-fail-under=70
+
+      - name: Scan dependencies for vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: app
+          severity: CRITICAL,HIGH
+          exit-code: 1
+
+      - name: Build Docker image (build-only, no push)
+        run: docker build -t ci-check:${{ github.sha }} app
+
+      - name: Notify Slack on failure
+        if: failure()
+        continue-on-error: true
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {"text": "CI Checks - Develop failed on PR #${{ github.event.pull_request.number }} → develop (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

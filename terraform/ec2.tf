@@ -1,3 +1,7 @@
+locals {
+  ecr_registry_host = split("/", aws_ecr_repository.app.repository_url)[0]
+}
+
 resource "aws_launch_template" "app" {
   name_prefix   = "${var.environment}-app-"
   image_id      = data.aws_ami.amazon_linux_2.id
@@ -11,13 +15,23 @@ resource "aws_launch_template" "app" {
 
   user_data = base64encode(<<-EOF
               #!/bin/bash
-              yum update -y
-              yum install -y amazon-linux-extras
-              amazon-linux-extras enable nginx1
-              yum install -y nginx
-              systemctl enable nginx
-              systemctl start nginx
-              echo "Hello from Terraform" > /usr/share/nginx/html/index.html
+              set -euo pipefail
+
+              amazon-linux-extras install docker -y
+              systemctl enable docker
+              systemctl start docker
+
+              REGION="${var.region}"
+              REGISTRY_HOST="${local.ecr_registry_host}"
+              REPO_URI="${aws_ecr_repository.app.repository_url}"
+              IMAGE_TAG_PARAM="${aws_ssm_parameter.image_tag.name}"
+
+              aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY_HOST"
+
+              IMAGE_TAG=$(aws ssm get-parameter --name "$IMAGE_TAG_PARAM" --region "$REGION" --query 'Parameter.Value' --output text)
+
+              docker pull "$REPO_URI:$IMAGE_TAG"
+              docker run -d --restart unless-stopped -p 80:80 "$REPO_URI:$IMAGE_TAG"
               EOF
   )
 
