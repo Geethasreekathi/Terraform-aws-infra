@@ -31,7 +31,7 @@ jobs:
       - name: Notify Slack on failure
         if: failure()
         continue-on-error: true
-        uses: ./.github/actions/notify-slack-failure
+        uses: ./.github/actions/notify-slack
         with:
           message: "CI Checks - Develop failed on PR #${{ github.event.pull_request.number }} → develop (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -22,21 +22,23 @@ Branch flow: feature branches → PR into `develop` (CI checks, auto-deploy on m
 |---|---|---|
 | [ci-develop.yml](.github/workflows/ci-develop.yml) | PR → `develop` | unit + integration tests, dependency vulnerability scan (Trivy), Docker build check |
 | [ci-main.yml](.github/workflows/ci-main.yml) | PR → `main` | same checks, gating the develop→main promotion |
-| [cd-develop.yml](.github/workflows/cd-develop.yml) | PR merged → `develop` | build image, scan image (Trivy), push to ECR, deploy (SSM param update + ASG instance refresh) gated by the `develop` GitHub Environment |
-| [cd-main.yml](.github/workflows/cd-main.yml) | PR merged → `main` | same build/scan/push, then deploy gated by the `main` GitHub Environment's required reviewers |
+| [cd-develop.yml](.github/workflows/cd-develop.yml) | PR merged → `develop` | single `build-and-deploy` job: build image, scan image (Trivy), push to ECR, deploy (SSM param update + ASG instance refresh) |
+| [cd-main.yml](.github/workflows/cd-main.yml) | PR merged → `main` | same single-job flow, gated by the `main` GitHub Environment's required reviewers |
 
 Both CD workflows deploy to the same EC2 Auto Scaling group provisioned in Task 1 — there's a single environment, not separate staging/production stacks, to avoid doubling AWS cost (a second ALB + NAT Gateway are not Free Tier eligible). Merges to `develop` and `main` both update the same running instances; production deploys are just gated by approval.
 
+Both CD workflows run as one job (`build-and-deploy`), not split into separate build/deploy jobs. For `cd-main.yml` this means the `main` environment's approval gate pauses the **entire** job — build and push included, not just the deploy step — since GitHub Environment protection rules apply at the job level.
+
 Authentication to AWS uses GitHub's OIDC provider (no long-lived AWS keys in GitHub secrets) — see the `ci_deploy` IAM role in [terraform/iam.tf](terraform/iam.tf).
 
-Repeated multi-step logic (running tests, build/scan/push, deploy, Slack notification) is factored into local composite actions under [.github/actions](.github/actions), so each shows as a single named step in the workflow run instead of a wall of raw shell steps:
+Repeated multi-step logic (running tests, image build+scan, deploy, Slack notification) is factored into local composite actions under [.github/actions](.github/actions), so each shows as a single named step in the workflow run instead of a wall of raw shell steps:
 
 - `test-python-app` — setup Python, install deps, run unit + integration tests
-- `docker-build-push` — build image, Trivy scan, push to ECR
+- `docker-build` — build image, Trivy scan (pushing to ECR is a separate explicit step in the workflow)
 - `deploy-ec2` — update the SSM image-tag parameter, trigger ASG instance refresh
-- `notify-slack-failure` — post a failure message to Slack
+- `notify-slack` — post a message to Slack (CI workflows use it with `if: failure()`; CD workflows use `if: always()` to report both successful and failed deploys)
 
 ### One-time manual setup required
 
-1. **Production approval gate**: GitHub → repo Settings → Environments → New environment → name it `main` → add yourself (or others) as required reviewers. Without this, `cd-main.yml`'s deploy job runs immediately with no approval step.
+1. **Production approval gate**: GitHub → repo Settings → Environments → New environment → name it `main` → add yourself (or others) as required reviewers. Without this, `cd-main.yml` runs immediately with no approval step.
 2. **Slack notifications**: create a Slack Incoming Webhook and add its URL as a repo secret named `SLACK_WEBHOOK_URL` (Settings → Secrets and variables → Actions). Notification steps are set to `continue-on-error`, so the pipeline works without it, just silently skips the Slack post.

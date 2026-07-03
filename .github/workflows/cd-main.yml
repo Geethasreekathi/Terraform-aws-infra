@@ -17,12 +17,16 @@ env:
   CI_DEPLOY_ROLE_ARN: arn:aws:iam::600929978273:role/dev-ci-deploy-role
 
 jobs:
-  build-and-push:
+  build-and-deploy:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    environment: main
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          clean: true
+          persist-credentials: false
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -34,34 +38,16 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, scan, and push Docker image
-        uses: ./.github/actions/docker-build-push
+      - name: Build Docker image
+        id: build
+        uses: ./.github/actions/docker-build
         with:
           ecr-registry: ${{ steps.ecr-login.outputs.registry }}
           ecr-repo-name: ${{ env.ECR_REPO_NAME }}
           image-tag: ${{ github.sha }}
 
-      - name: Notify Slack on failure
-        if: failure()
-        continue-on-error: true
-        uses: ./.github/actions/notify-slack-failure
-        with:
-          message: "Build/push failed on main — commit ${{ github.sha }} (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
-
-  deploy-main:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    environment: main
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ env.CI_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+      - name: Push to ECR
+        run: docker push ${{ steps.build.outputs.image-uri }}
 
       - name: Deploy to EC2
         uses: ./.github/actions/deploy-ec2
@@ -70,10 +56,10 @@ jobs:
           image-tag: ${{ github.sha }}
           asg-name: ${{ env.ASG_NAME }}
 
-      - name: Notify Slack on failure
-        if: failure()
+      - name: Push notification to Slack
+        if: always()
         continue-on-error: true
-        uses: ./.github/actions/notify-slack-failure
+        uses: ./.github/actions/notify-slack
         with:
-          message: "Main deploy failed — commit ${{ github.sha }} (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          message: "${{ job.status == 'success' && '✅ Main deploy succeeded' || '❌ Main deploy failed' }} — commit ${{ github.sha }} (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
