@@ -10,6 +10,27 @@ Copy [terraform/terraform.tfvars.example](terraform/terraform.tfvars.example) to
 
 The one-time [terraform/bootstrap](terraform/bootstrap) config creates the S3 bucket and DynamoDB table used by the main config's remote state backend.
 
+## Backup strategy
+
+The RDS instance ([terraform/rds.tf](terraform/rds.tf)) takes automated daily backups with a 7-day retention period (`db_backup_retention_period` in [terraform/variables.tf](terraform/variables.tf)), during a defined backup window (`03:00-04:00` UTC) that doesn't overlap the weekly maintenance window (`mon:04:30-mon:05:30` UTC).
+
+This gives point-in-time recovery to any second within the last 7 days:
+
+```
+aws rds restore-db-instance-to-point-in-time \
+  --source-db-instance-identifier dev-postgres \
+  --target-db-instance-identifier dev-postgres-restored \
+  --restore-time 2026-07-01T12:00:00Z
+```
+
+(Restoring always creates a new instance — RDS can't restore in place.)
+
+`skip_final_snapshot = true` is a deliberate trade-off for this assignment: it lets `terraform destroy` tear down the DB cleanly without needing a unique final-snapshot name each time. In production, that would instead be `skip_final_snapshot = false` with `deletion_protection = true`, so accidental deletion can't skip a final backup.
+
+## Monitoring dashboards
+
+[grafana](grafana) contains dashboard-as-code for two Grafana dashboards (Infrastructure: app EC2 + RDS CPU; Application: app request rate + DB request rate) backed directly by CloudWatch — no extra infra to deploy. See [grafana/README.md](grafana/README.md) for setup.
+
 ## Sample app
 
 [app](app) contains a minimal Flask app (with unit + integration tests and a `Dockerfile`) used to exercise the CI/CD pipeline below. The EC2 instances run it as a Docker container, pulling the image tag stored in SSM Parameter Store (`/dev/app/image-tag`) from ECR at boot.

@@ -32,7 +32,10 @@ resource "aws_db_instance" "postgres" {
   vpc_security_group_ids  = [aws_security_group.rds.id]
   publicly_accessible     = false
   skip_final_snapshot     = true
-  backup_retention_period = 1
+  backup_retention_period = var.db_backup_retention_period
+  backup_window           = "03:00-04:00"
+  maintenance_window      = "mon:04:30-mon:05:30"
+  copy_tags_to_snapshot   = true
 
   tags = {
     Name = "${var.environment}-postgres"
