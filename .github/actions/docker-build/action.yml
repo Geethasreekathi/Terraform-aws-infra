@@ -1,0 +1,42 @@
+name: Build Docker image
+description: Build the app Docker image and scan it for vulnerabilities
+
+inputs:
+  ecr-registry:
+    description: ECR registry hostname (from aws-actions/amazon-ecr-login output)
+    required: true
+  ecr-repo-name:
+    description: ECR repository name
+    required: true
+  image-tag:
+    description: Tag to build
+    required: true
+  context:
+    description: Docker build context
+    required: false
+    default: app
+
+outputs:
+  image-uri:
+    description: Full image URI that was built
+    value: ${{ steps.image.outputs.uri }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set image URI
+      id: image
+      shell: bash
+      run: echo "uri=${{ inputs.ecr-registry }}/${{ inputs.ecr-repo-name }}:${{ inputs.image-tag }}" >> "$GITHUB_OUTPUT"
+
+    - name: Build image
+      shell: bash
+      run: docker build -t ${{ steps.image.outputs.uri }} ${{ inputs.context }}
+
+    - name: Scan image for vulnerabilities
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        scan-type: image
+        image-ref: ${{ steps.image.outputs.uri }}
+        severity: CRITICAL,HIGH
+        exit-code: 1

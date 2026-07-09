@@ -1,0 +1,22 @@
+name: Notify Slack
+description: Post a message to Slack via an incoming webhook
+
+inputs:
+  message:
+    description: Message text to post
+    required: true
+  webhook-url:
+    description: Slack incoming webhook URL
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Post to Slack
+      uses: slackapi/slack-github-action@v1.27.0
+      with:
+        payload: |
+          {"text": "${{ inputs.message }}"}
+      env:
+        SLACK_WEBHOOK_URL: ${{ inputs.webhook-url }}
+        SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
