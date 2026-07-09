@@ -1,0 +1,32 @@
+name: Deploy to EC2
+description: Update the ECR image tag SSM parameter and trigger an ASG instance refresh
+
+inputs:
+  image-tag-param:
+    description: SSM parameter name holding the image tag
+    required: true
+  image-tag:
+    description: New image tag value to deploy
+    required: true
+  asg-name:
+    description: Auto Scaling Group name to refresh
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Update image tag in SSM
+      shell: bash
+      run: |
+        aws ssm put-parameter \
+          --name "${{ inputs.image-tag-param }}" \
+          --value "${{ inputs.image-tag }}" \
+          --type String \
+          --overwrite
+
+    - name: Trigger EC2 instance refresh
+      shell: bash
+      run: |
+        aws autoscaling start-instance-refresh \
+          --auto-scaling-group-name "${{ inputs.asg-name }}" \
+          --preferences '{"MinHealthyPercentage":50,"InstanceWarmup":90}'

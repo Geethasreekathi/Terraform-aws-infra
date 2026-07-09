@@ -1,0 +1,65 @@
+name: CD - Deploy (main)
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPO_NAME: dev-app
+  ASG_NAME: dev-app-asg
+  IMAGE_TAG_PARAM: /dev/app/image-tag
+  CI_DEPLOY_ROLE_ARN: arn:aws:iam::600929978273:role/dev-ci-deploy-role
+
+jobs:
+  build-and-deploy:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    environment: main
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          clean: true
+          persist-credentials: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.CI_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        id: build
+        uses: ./.github/actions/docker-build
+        with:
+          ecr-registry: ${{ steps.ecr-login.outputs.registry }}
+          ecr-repo-name: ${{ env.ECR_REPO_NAME }}
+          image-tag: ${{ github.sha }}
+
+      - name: Push to ECR
+        run: docker push ${{ steps.build.outputs.image-uri }}
+
+      - name: Deploy to EC2
+        uses: ./.github/actions/deploy-ec2
+        with:
+          image-tag-param: ${{ env.IMAGE_TAG_PARAM }}
+          image-tag: ${{ github.sha }}
+          asg-name: ${{ env.ASG_NAME }}
+
+      - name: Push notification to Slack
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/notify-slack
+        with:
+          message: "${{ job.status == 'success' && '✅ Main deploy succeeded' || '❌ Main deploy failed' }} — commit ${{ github.sha }} (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
