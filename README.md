@@ -10,9 +10,11 @@ The one-time [terraform/bootstrap](terraform/bootstrap) config creates the S3 bu
 
 ## Backup strategy
 
-The RDS instance ([terraform/rds.tf](terraform/rds.tf)) takes automated daily backups with a 7-day retention period (`db_backup_retention_period` in [terraform/variables.tf](terraform/variables.tf)), during a defined backup window (`03:00-04:00` UTC) that doesn't overlap the weekly maintenance window (`mon:04:30-mon:05:30` UTC).
+The RDS instance ([terraform/rds.tf](terraform/rds.tf)) takes automated daily backups with a 1-day retention period (`db_backup_retention_period` in [terraform/variables.tf](terraform/variables.tf)), during a defined backup window (`03:00-04:00` UTC) that doesn't overlap the weekly maintenance window (`mon:04:30-mon:05:30` UTC).
 
-This gives point-in-time recovery to any second within the last 7 days:
+Retention is set to 1 day because this account is on the RDS free tier, which rejects longer periods (`FreeTierRestrictionError`). A production deployment would raise `db_backup_retention_period` to 7 or more — the variable is the only change needed.
+
+This gives point-in-time recovery to any second within the last day:
 
 ```
 aws rds restore-db-instance-to-point-in-time \
